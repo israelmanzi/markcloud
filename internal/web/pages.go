@@ -85,18 +85,21 @@ func (s *Server) handlePage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.handleListing(w, r, prefix, data)
+	s.renderListing(w, prefix, docs, data)
 }
 
 func (s *Server) handleListing(w http.ResponseWriter, r *http.Request, prefix string, data map[string]any) {
-	authenticated := data["Authenticated"].(bool)
-
 	docs, err := s.store.List(prefix)
 	if err != nil {
 		http.Error(w, "Internal error", http.StatusInternalServerError)
 		return
 	}
 
+	s.renderListing(w, prefix, docs, data)
+}
+
+func (s *Server) renderListing(w http.ResponseWriter, prefix string, docs []store.Document, data map[string]any) {
+	authenticated := data["Authenticated"].(bool)
 	entries := buildDirectoryEntries(docs, prefix, authenticated)
 
 	data["Path"] = strings.TrimSuffix(prefix, "/")
@@ -114,32 +117,24 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request, data map[s
 		return
 	}
 
-	if !authenticated {
-		var filtered []store.SearchResult
-		for _, r := range results {
-			doc, _ := s.store.Get(r.Path)
-			if doc != nil && doc.Public {
-				filtered = append(filtered, r)
-			}
-		}
-		results = filtered
-	}
-
-	// Convert search results to dir entries for the same template
 	var entries []DirEntry
 	for _, r := range results {
+		doc, _ := s.store.Get(r.Path)
+		if doc == nil {
+			continue
+		}
+		if !authenticated && !doc.Public {
+			continue
+		}
 		path := strings.TrimSuffix(r.Path, ".md")
-		entry := DirEntry{
+		entries = append(entries, DirEntry{
 			Name:    r.Title,
 			Path:    "/" + path,
 			Snippet: cleanSnippet(r.Snippet),
-		}
-		if doc, _ := s.store.Get(r.Path); doc != nil {
-			entry.Public = doc.Public
-			entry.Tags = doc.Tags
-			entry.Date = doc.UpdatedAt
-		}
-		entries = append(entries, entry)
+			Public:  doc.Public,
+			Tags:    doc.Tags,
+			Date:    doc.UpdatedAt,
+		})
 	}
 
 	data["Path"] = ""

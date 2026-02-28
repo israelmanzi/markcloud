@@ -11,6 +11,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const contentPrefix = "content/"
+
 func NewRootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "mc",
@@ -34,7 +36,7 @@ func getClient() (*GitHubClient, error) {
 	if err != nil {
 		return nil, fmt.Errorf("load config: %w (create ~/.markcloud.yaml)", err)
 	}
-	return NewGitHubClient(cfg.GitHubToken, cfg.GitHubRepo), nil
+	return NewGitHubClient(cfg.GitHubToken, cfg.GitHubRepo)
 }
 
 func newUploadCmd() *cobra.Command {
@@ -64,9 +66,9 @@ func newUploadCmd() *cobra.Command {
 
 			fullContent := frontmatter.Serialize(meta, body)
 
-			remotePath := name + ".md"
+			remotePath := contentPrefix + name + ".md"
 			if dir != "" {
-				remotePath = strings.Trim(dir, "/") + "/" + remotePath
+				remotePath = contentPrefix + strings.Trim(dir, "/") + "/" + name + ".md"
 			}
 
 			if dryRun {
@@ -119,13 +121,13 @@ func newLsCmd() *cobra.Command {
 				return err
 			}
 
-			path := ""
+			path := contentPrefix
 			if len(args) > 0 {
-				path = args[0]
+				path = contentPrefix + args[0]
 			}
 
 			ctx := context.Background()
-			contents, err := gh.ListDir(ctx, path)
+			contents, err := gh.ListDir(ctx, strings.TrimSuffix(path, "/"))
 			if err != nil {
 				return err
 			}
@@ -156,7 +158,7 @@ func newInfoCmd() *cobra.Command {
 				return err
 			}
 
-			path := args[0]
+			path := contentPrefix + args[0]
 			if !strings.HasSuffix(path, ".md") {
 				path += ".md"
 			}
@@ -208,6 +210,7 @@ func setVisibility(path string, public bool) error {
 		return err
 	}
 
+	path = contentPrefix + path
 	if !strings.HasSuffix(path, ".md") {
 		path += ".md"
 	}
@@ -245,7 +248,7 @@ func newRmCmd() *cobra.Command {
 				return err
 			}
 
-			path := args[0]
+			path := contentPrefix + args[0]
 			if !strings.HasSuffix(path, ".md") {
 				path += ".md"
 			}
@@ -267,8 +270,8 @@ func newMvCmd() *cobra.Command {
 				return err
 			}
 
-			src := args[0]
-			dst := args[1]
+			src := contentPrefix + args[0]
+			dst := contentPrefix + args[1]
 			if !strings.HasSuffix(src, ".md") {
 				src += ".md"
 			}

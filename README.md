@@ -1,6 +1,6 @@
 # markcloud
 
-A personal markdown hosting platform. Write locally, push to GitHub, and your documents are rendered and served at `markdown.israelmanzi.com`.
+A personal markdown hosting platform. Write locally, push to GitHub, and your documents are rendered and served at `markcloud.israelmanzi.com`.
 
 ## What it does
 
@@ -26,7 +26,7 @@ Documents are authored locally as markdown files with frontmatter for metadata (
   +---------+    +-----------------+                      |  templates     |
                                                           +-------+--------+
                                                                   |
-                                                    markdown.israelmanzi.com
+                                                    markcloud.israelmanzi.com
                                                                   |
                                                   +---------------+---------------+
                                                   |                               |

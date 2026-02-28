@@ -1,33 +1,104 @@
-name: Deploy to markcloud
+name: Deploy
 
 on:
   push:
     branches: [main]
-    paths: ["**.md"]
 
 jobs:
-  sync:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      app: ${{ steps.filter.outputs.app }}
+      content: ${{ steps.filter.outputs.content }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            app:
+              - 'cmd/**'
+              - 'internal/**'
+              - 'static/**'
+              - 'templates/**'
+              - 'go.mod'
+              - 'go.sum'
+              - 'Dockerfile'
+              - 'docker-compose.yml'
+            content:
+              - 'content/**'
+
+  app:
+    needs: changes
+    if: needs.changes.outputs.app == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy app to server
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          script: |
+            set -e
+            cd ${{ secrets.APP_DIR }}
+
+            PREV=$(docker compose exec -T markcloud cat /app/.version 2>/dev/null || echo "none")
+
+            git fetch origin main
+            git reset --hard origin/main
+
+            docker compose build --no-cache
+            docker compose up -d
+
+            OK=false
+            for i in 1 2 3 4 5; do
+              sleep 3
+              if curl -sf --max-time 5 http://127.0.0.1:8080/ > /dev/null 2>&1; then
+                OK=true
+                break
+              fi
+              echo "Health check attempt $i failed"
+            done
+
+            if [ "$OK" = "false" ]; then
+              echo "Health check failed, rolling back..."
+              if [ "$PREV" != "none" ]; then
+                git reset --hard "$PREV"
+                docker compose build --no-cache
+                docker compose up -d
+                echo "Rolled back to $PREV"
+              else
+                echo "No previous version to rollback to"
+              fi
+              exit 1
+            fi
+
+            docker compose exec -T markcloud sh -c "echo $(git rev-parse HEAD) > /app/.version" 2>/dev/null || true
+            echo "Deployed $(git rev-parse --short HEAD)"
+
+  content:
+    needs: changes
+    if: needs.changes.outputs.content == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Collect and sync markdown files
+      - name: Sync markdown to server
         env:
           DEPLOY_SECRET: ${{ secrets.MARKCLOUD_DEPLOY_SECRET }}
           SERVER_URL: ${{ secrets.MARKCLOUD_SERVER_URL }}
         run: |
-          # Build manifest
           MANIFEST="[]"
           ALL_PATHS="[]"
 
-          for file in $(find . -name "*.md" -not -path "./.github/*" -not -path "./README.md" -not -path "./CHANGELOG.md"); do
-            path="${file#./}"
+          for file in $(find ./content -name "*.md" 2>/dev/null); do
+            path="${file#./content/}"
             sha=$(sha256sum "$file" | cut -d' ' -f1)
             MANIFEST=$(echo "$MANIFEST" | jq --arg p "$path" --arg s "$sha" '. + [{"path": $p, "sha": $s}]')
             ALL_PATHS=$(echo "$ALL_PATHS" | jq --arg p "$path" '. + [$p]')
           done
 
-          # Step 1: Send manifest, get diff
           DIFF=$(curl -sf -X POST "$SERVER_URL/api/sync/manifest" \
             -H "Authorization: Bearer $DEPLOY_SECRET" \
             -H "Content-Type: application/json" \
@@ -40,11 +111,10 @@ jobs:
             exit 0
           fi
 
-          # Step 2: Send changed files
           FILES="[]"
           for path in $NEED_CONTENT; do
-            sha=$(sha256sum "$path" | cut -d' ' -f1)
-            content=$(cat "$path")
+            sha=$(sha256sum "content/$path" | cut -d' ' -f1)
+            content=$(cat "content/$path")
             FILES=$(echo "$FILES" | jq --arg p "$path" --arg c "$content" --arg s "$sha" \
               '. + [{"path": $p, "content": $c, "sha": $s}]')
           done

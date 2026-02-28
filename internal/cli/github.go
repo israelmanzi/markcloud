@@ -15,8 +15,11 @@ type GitHubClient struct {
 	repo   string
 }
 
-func NewGitHubClient(token, repoFullName string) *GitHubClient {
+func NewGitHubClient(token, repoFullName string) (*GitHubClient, error) {
 	parts := strings.SplitN(repoFullName, "/", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return nil, fmt.Errorf("invalid github_repo %q: expected owner/repo", repoFullName)
+	}
 	ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
 	tc := oauth2.NewClient(context.Background(), ts)
 
@@ -24,7 +27,7 @@ func NewGitHubClient(token, repoFullName string) *GitHubClient {
 		client: github.NewClient(tc),
 		owner:  parts[0],
 		repo:   parts[1],
-	}
+	}, nil
 }
 
 func (g *GitHubClient) ListDir(ctx context.Context, path string) ([]*github.RepositoryContent, error) {
