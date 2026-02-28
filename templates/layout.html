@@ -11,7 +11,7 @@
     <nav>
       <a href="/" class="nav-brand">markcloud</a>
       <form method="GET" action="/" class="nav-search">
-        <input type="text" name="q" placeholder="search..." value="{{.Query}}">
+        <input type="text" name="q" placeholder="search..." value="{{.Query}}" autocomplete="off">
         {{if .Query}}<button type="button" class="clear-search" onclick="window.location='{{.CurrentPath}}'">clear</button>{{end}}
         <button type="submit">search</button>
       </form>
