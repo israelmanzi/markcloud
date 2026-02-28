@@ -1,6 +1,12 @@
 {{template "layout" .}}
 {{define "title"}}{{if .Path}}{{.Path}}{{else}}markcloud{{end}}{{end}}
 {{define "content"}}
+{{if .Breadcrumbs}}
+<nav class="breadcrumbs">
+  {{range .Breadcrumbs}}{{if .Last}}<span>{{.Name}}</span>{{else}}<a href="{{.Href}}">{{.Name}}</a> / {{end}}{{end}}
+</nav>
+{{end}}
+{{if .TagFilter}}<h1>Tagged "{{.TagFilter}}"</h1>{{end}}
 {{if .SearchResults}}<h1>Results for "{{.Query}}"</h1>{{end}}
 {{if .Path}}<h1>{{.Path}}/</h1>{{end}}
 {{if .Entries}}
@@ -13,13 +19,13 @@
       <div class="entry-meta">
         {{if not .Date.IsZero}}<span class="date">{{humanDate .Date}}</span>{{end}}
         {{if $.Authenticated}}{{if .Public}}<span class="badge badge-public">public</span>{{else}}<span class="badge badge-private">private</span>{{end}}{{end}}
-        {{range .Tags}}<span class="tag">{{.}}</span>{{end}}
+        {{range .Tags}}<a href="/?tag={{.}}" class="tag">{{.}}</a>{{end}}
       </div>
     {{end}}
   </li>
   {{end}}
 </ul>
 {{else}}
-  {{if .SearchResults}}<p>No results.</p>{{else}}<p>No documents.</p>{{end}}
+  {{if .SearchResults}}<p>No results.</p>{{else if .TagFilter}}<p>No documents with this tag.</p>{{else}}<p>No documents.</p>{{end}}
 {{end}}
 {{end}}

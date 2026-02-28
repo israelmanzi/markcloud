@@ -3,13 +3,15 @@ package cli
 import (
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
 
 type Config struct {
-	GitHubRepo  string `yaml:"github_repo"`
-	GitHubToken string `yaml:"github_token"`
+	ServerURL    string `yaml:"server_url"`
+	DeploySecret string `yaml:"deploy_secret"`
+	ContentDir   string `yaml:"content_dir"`
 }
 
 func LoadConfig() (*Config, error) {
@@ -25,6 +27,10 @@ func LoadConfigFrom(path string) (*Config, error) {
 	var cfg Config
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, err
+	}
+	if strings.HasPrefix(cfg.ContentDir, "~/") {
+		home, _ := os.UserHomeDir()
+		cfg.ContentDir = filepath.Join(home, cfg.ContentDir[2:])
 	}
 	return &cfg, nil
 }

@@ -1,18 +1,16 @@
 package cli
 
 import (
-	"context"
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/israelmanzi/markcloud/internal/frontmatter"
+	gosync "github.com/israelmanzi/markcloud/internal/sync"
 	"github.com/spf13/cobra"
 )
-
-const contentPrefix = "content/"
 
 func NewRootCmd() *cobra.Command {
 	root := &cobra.Command{
@@ -20,6 +18,7 @@ func NewRootCmd() *cobra.Command {
 		Short: "markcloud CLI - manage your markdown documents",
 	}
 
+	root.AddCommand(newSyncCmd())
 	root.AddCommand(newUploadCmd())
 	root.AddCommand(newLsCmd())
 	root.AddCommand(newInfoCmd())
@@ -27,28 +26,140 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newPrivateCmd())
 	root.AddCommand(newRmCmd())
 	root.AddCommand(newMvCmd())
-	root.AddCommand(newStatusCmd())
-	root.AddCommand(newSyncCmd())
 
 	return root
 }
 
-func getClient() (*GitHubClient, error) {
+func getConfig() (*Config, error) {
 	cfg, err := LoadConfig()
 	if err != nil {
 		return nil, fmt.Errorf("load config: %w (create ~/.markcloud.yaml)", err)
 	}
-	return NewGitHubClient(cfg.GitHubToken, cfg.GitHubRepo)
+	return cfg, nil
+}
+
+func getServerClient(cfg *Config) *ServerClient {
+	return NewServerClient(cfg.ServerURL, cfg.DeploySecret)
+}
+
+// walkContent collects all .md files under content_dir, returning manifest entries,
+// file entries for those needing upload, and all relative paths.
+func walkContent(dir string) ([]gosync.ManifestEntry, map[string][]byte, []string, error) {
+	var manifest []gosync.ManifestEntry
+	contents := make(map[string][]byte)
+	var allPaths []string
+
+	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			if info.Name() == ".git" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".md") {
+			return nil
+		}
+
+		rel, _ := filepath.Rel(dir, path)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+
+		sha := fmt.Sprintf("%x", sha256.Sum256(data))
+		manifest = append(manifest, gosync.ManifestEntry{Path: rel, SHA: sha})
+		contents[rel] = data
+		allPaths = append(allPaths, rel)
+		return nil
+	})
+
+	return manifest, contents, allPaths, err
+}
+
+func syncAll(cfg *Config, client *ServerClient) error {
+	manifest, contents, allPaths, err := walkContent(cfg.ContentDir)
+	if err != nil {
+		return fmt.Errorf("walking content: %w", err)
+	}
+
+	if len(manifest) == 0 {
+		fmt.Println("No markdown files found")
+		return nil
+	}
+
+	needContent, err := client.Manifest(manifest)
+	if err != nil {
+		return err
+	}
+
+	var files []gosync.FileEntry
+	for _, path := range needContent {
+		data, ok := contents[path]
+		if !ok {
+			continue
+		}
+		sha := fmt.Sprintf("%x", sha256.Sum256(data))
+		files = append(files, gosync.FileEntry{
+			Path:    path,
+			Content: string(data),
+			SHA:     sha,
+		})
+	}
+
+	if len(files) == 0 && len(allPaths) > 0 {
+		// Still send all_paths so server can clean orphans
+		return client.Upload(nil, allPaths)
+	}
+
+	if len(files) > 0 {
+		if err := client.Upload(files, allPaths); err != nil {
+			return err
+		}
+		fmt.Printf("Synced %d file(s)\n", len(files))
+	}
+
+	return nil
+}
+
+func newSyncCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "sync",
+		Short: "Sync content directory to server",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := getConfig()
+			if err != nil {
+				return err
+			}
+
+			if err := gitInit(cfg.ContentDir); err != nil {
+				return fmt.Errorf("git init: %w", err)
+			}
+			if err := gitCommit(cfg.ContentDir, "auto-commit before sync"); err != nil {
+				return fmt.Errorf("git commit: %w", err)
+			}
+
+			fmt.Println("Syncing...")
+			return syncAll(cfg, getServerClient(cfg))
+		},
+	}
 }
 
 func newUploadCmd() *cobra.Command {
 	var filePath, name, dir, tags string
-	var public, dryRun bool
+	var public bool
 
 	cmd := &cobra.Command{
 		Use:   "upload",
 		Short: "Upload a markdown file",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := getConfig()
+			if err != nil {
+				return err
+			}
+
 			content, err := os.ReadFile(filePath)
 			if err != nil {
 				return fmt.Errorf("reading file: %w", err)
@@ -68,37 +179,29 @@ func newUploadCmd() *cobra.Command {
 
 			fullContent := frontmatter.Serialize(meta, body)
 
-			remotePath := contentPrefix + name + ".md"
+			relPath := name + ".md"
 			if dir != "" {
-				remotePath = contentPrefix + strings.Trim(dir, "/") + "/" + name + ".md"
+				relPath = strings.Trim(dir, "/") + "/" + name + ".md"
 			}
 
-			if dryRun {
-				cfg, err := LoadConfig()
-				if err != nil {
-					return fmt.Errorf("load config: %w", err)
-				}
-				fmt.Printf("curl -X PUT \\\n")
-				fmt.Printf("  -H \"Authorization: token %s\" \\\n", cfg.GitHubToken)
-				fmt.Printf("  -H \"Content-Type: application/json\" \\\n")
-				fmt.Printf("  https://api.github.com/repos/%s/contents/%s \\\n", cfg.GitHubRepo, remotePath)
-				fmt.Printf("  -d '{\"message\":\"upload %s\",\"content\":\"<base64-content>\"}'\n", remotePath)
-				return nil
+			destPath := filepath.Join(cfg.ContentDir, relPath)
+			if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
+				return err
 			}
-
-			gh, err := getClient()
-			if err != nil {
+			if err := os.WriteFile(destPath, fullContent, 0644); err != nil {
 				return err
 			}
 
-			ctx := context.Background()
-			msg := fmt.Sprintf("upload %s", remotePath)
-			if err := gh.CreateOrUpdateFile(ctx, remotePath, fullContent, msg); err != nil {
-				return fmt.Errorf("upload failed: %w", err)
+			if err := gitInit(cfg.ContentDir); err != nil {
+				return fmt.Errorf("git init: %w", err)
+			}
+			if err := gitCommit(cfg.ContentDir, fmt.Sprintf("upload %s", relPath)); err != nil {
+				return fmt.Errorf("git commit: %w", err)
 			}
 
-			fmt.Printf("Uploaded → %s\n", remotePath)
-			return nil
+			fmt.Printf("Uploaded → %s\n", relPath)
+			fmt.Println("Syncing...")
+			return syncAll(cfg, getServerClient(cfg))
 		},
 	}
 
@@ -107,36 +210,37 @@ func newUploadCmd() *cobra.Command {
 	cmd.Flags().StringVar(&dir, "dir", "", "Target directory")
 	cmd.Flags().StringVar(&tags, "tags", "", "Comma-separated tags")
 	cmd.Flags().BoolVar(&public, "public", false, "Make document public")
-	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Print curl command instead of uploading")
 	cmd.MarkFlagRequired("path")
 
 	return cmd
 }
 
 func newLsCmd() *cobra.Command {
-	cmd := &cobra.Command{
+	return &cobra.Command{
 		Use:   "ls [dir]",
 		Short: "List documents",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			gh, err := getClient()
+			cfg, err := getConfig()
 			if err != nil {
 				return err
 			}
 
-			path := contentPrefix
+			root := cfg.ContentDir
 			if len(args) > 0 {
-				path = contentPrefix + args[0]
+				root = filepath.Join(cfg.ContentDir, args[0])
 			}
 
-			ctx := context.Background()
-			contents, err := gh.ListDir(ctx, strings.TrimSuffix(path, "/"))
+			entries, err := os.ReadDir(root)
 			if err != nil {
-				return err
+				return fmt.Errorf("listing %s: %w", root, err)
 			}
 
-			for _, c := range contents {
-				name := c.GetName()
-				if c.GetType() == "dir" {
+			for _, e := range entries {
+				name := e.Name()
+				if e.IsDir() {
+					if name == ".git" {
+						continue
+					}
 					fmt.Printf("  %s/\n", name)
 				} else if strings.HasSuffix(name, ".md") {
 					fmt.Printf("  %s\n", strings.TrimSuffix(name, ".md"))
@@ -145,8 +249,6 @@ func newLsCmd() *cobra.Command {
 			return nil
 		},
 	}
-
-	return cmd
 }
 
 func newInfoCmd() *cobra.Command {
@@ -155,23 +257,22 @@ func newInfoCmd() *cobra.Command {
 		Short: "Show document metadata",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			gh, err := getClient()
+			cfg, err := getConfig()
 			if err != nil {
 				return err
 			}
 
-			path := contentPrefix + args[0]
+			path := args[0]
 			if !strings.HasSuffix(path, ".md") {
 				path += ".md"
 			}
 
-			ctx := context.Background()
-			content, err := gh.GetFile(ctx, path)
+			data, err := os.ReadFile(filepath.Join(cfg.ContentDir, path))
 			if err != nil {
-				return err
+				return fmt.Errorf("reading %s: %w", path, err)
 			}
 
-			meta, _, err := frontmatter.Parse([]byte(content))
+			meta, _, err := frontmatter.Parse(data)
 			if err != nil {
 				return err
 			}
@@ -207,36 +308,46 @@ func newPrivateCmd() *cobra.Command {
 }
 
 func setVisibility(path string, public bool) error {
-	gh, err := getClient()
+	cfg, err := getConfig()
 	if err != nil {
 		return err
 	}
 
-	path = contentPrefix + path
 	if !strings.HasSuffix(path, ".md") {
 		path += ".md"
 	}
 
-	ctx := context.Background()
-	content, err := gh.GetFile(ctx, path)
+	fullPath := filepath.Join(cfg.ContentDir, path)
+	data, err := os.ReadFile(fullPath)
 	if err != nil {
-		return err
+		return fmt.Errorf("reading %s: %w", path, err)
 	}
 
-	meta, body, err := frontmatter.Parse([]byte(content))
+	meta, body, err := frontmatter.Parse(data)
 	if err != nil {
 		return err
 	}
 
 	meta.Public = public
-	updated := frontmatter.Serialize(meta, body)
+	if err := os.WriteFile(fullPath, frontmatter.Serialize(meta, body), 0644); err != nil {
+		return err
+	}
 
 	action := "private"
 	if public {
 		action = "public"
 	}
 
-	return gh.CreateOrUpdateFile(ctx, path, updated, fmt.Sprintf("set %s %s", path, action))
+	if err := gitInit(cfg.ContentDir); err != nil {
+		return fmt.Errorf("git init: %w", err)
+	}
+	if err := gitCommit(cfg.ContentDir, fmt.Sprintf("set %s %s", path, action)); err != nil {
+		return fmt.Errorf("git commit: %w", err)
+	}
+
+	fmt.Printf("Set %s → %s\n", path, action)
+	fmt.Println("Syncing...")
+	return syncAll(cfg, getServerClient(cfg))
 }
 
 func newRmCmd() *cobra.Command {
@@ -245,18 +356,31 @@ func newRmCmd() *cobra.Command {
 		Short: "Delete a document",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			gh, err := getClient()
+			cfg, err := getConfig()
 			if err != nil {
 				return err
 			}
 
-			path := contentPrefix + args[0]
+			path := args[0]
 			if !strings.HasSuffix(path, ".md") {
 				path += ".md"
 			}
 
-			ctx := context.Background()
-			return gh.DeleteFile(ctx, path, fmt.Sprintf("delete %s", path))
+			fullPath := filepath.Join(cfg.ContentDir, path)
+			if err := os.Remove(fullPath); err != nil {
+				return fmt.Errorf("deleting %s: %w", path, err)
+			}
+
+			if err := gitInit(cfg.ContentDir); err != nil {
+				return fmt.Errorf("git init: %w", err)
+			}
+			if err := gitCommit(cfg.ContentDir, fmt.Sprintf("delete %s", path)); err != nil {
+				return fmt.Errorf("git commit: %w", err)
+			}
+
+			fmt.Printf("Deleted %s\n", path)
+			fmt.Println("Syncing...")
+			return syncAll(cfg, getServerClient(cfg))
 		},
 	}
 }
@@ -267,13 +391,13 @@ func newMvCmd() *cobra.Command {
 		Short: "Move or rename a document",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			gh, err := getClient()
+			cfg, err := getConfig()
 			if err != nil {
 				return err
 			}
 
-			src := contentPrefix + args[0]
-			dst := contentPrefix + args[1]
+			src := args[0]
+			dst := args[1]
 			if !strings.HasSuffix(src, ".md") {
 				src += ".md"
 			}
@@ -281,85 +405,26 @@ func newMvCmd() *cobra.Command {
 				dst += ".md"
 			}
 
-			ctx := context.Background()
+			srcPath := filepath.Join(cfg.ContentDir, src)
+			dstPath := filepath.Join(cfg.ContentDir, dst)
 
-			content, err := gh.GetFile(ctx, src)
-			if err != nil {
-				return fmt.Errorf("source not found: %w", err)
-			}
-
-			if err := gh.CreateOrUpdateFile(ctx, dst, []byte(content), fmt.Sprintf("move %s to %s", src, dst)); err != nil {
+			if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil {
 				return err
 			}
-
-			return gh.DeleteFile(ctx, src, fmt.Sprintf("move %s to %s (delete old)", src, dst))
-		},
-	}
-}
-
-func newStatusCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "status",
-		Short: "Check latest deployment status",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			gh, err := getClient()
-			if err != nil {
-				return err
+			if err := os.Rename(srcPath, dstPath); err != nil {
+				return fmt.Errorf("moving %s to %s: %w", src, dst, err)
 			}
 
-			ctx := context.Background()
-			frames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
-			frame := 0
-
-			for {
-				run, err := gh.GetLatestWorkflowRun(ctx)
-				if err != nil {
-					return err
-				}
-
-				status := run.GetStatus()
-				if status == "completed" {
-					conclusion := run.GetConclusion()
-					mark := "✓"
-					if conclusion != "success" {
-						mark = "✗"
-					}
-					fmt.Printf("\r%s %s — %s\n", mark, run.GetName(), conclusion)
-					fmt.Printf("  %s\n", run.GetHTMLURL())
-					return nil
-				}
-
-				fmt.Printf("\r%s %s — %s...", frames[frame%len(frames)], run.GetName(), status)
-				frame++
-				time.Sleep(3 * time.Second)
+			if err := gitInit(cfg.ContentDir); err != nil {
+				return fmt.Errorf("git init: %w", err)
 			}
-		},
-	}
-}
-
-func newSyncCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "sync",
-		Short: "Trigger content sync to server",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			gh, err := getClient()
-			if err != nil {
-				return err
+			if err := gitCommit(cfg.ContentDir, fmt.Sprintf("move %s to %s", src, dst)); err != nil {
+				return fmt.Errorf("git commit: %w", err)
 			}
 
-			ctx := context.Background()
-			fmt.Print("Triggering sync...")
-
-			err = gh.DispatchWorkflow(ctx, "deploy.yml", "main", map[string]interface{}{
-				"sync_content": "true",
-			})
-			if err != nil {
-				return fmt.Errorf("dispatch failed: %w", err)
-			}
-
-			fmt.Println(" triggered")
-			fmt.Println("Run `mc status` to track progress")
-			return nil
+			fmt.Printf("Moved %s → %s\n", src, dst)
+			fmt.Println("Syncing...")
+			return syncAll(cfg, getServerClient(cfg))
 		},
 	}
 }

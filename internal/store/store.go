@@ -16,6 +16,8 @@ type Document struct {
 	SHA         string
 	Public      bool
 	Tags        []string
+	TOCHTML     string
+	Description string
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 }
@@ -81,6 +83,23 @@ func migrate(db *sql.DB) error {
 			VALUES (new.rowid, new.path, new.title, new.content_md);
 		END;
 	`)
+	if err != nil {
+		return err
+	}
+
+	// Add new columns (ignore error if they already exist)
+	db.Exec(`ALTER TABLE documents ADD COLUMN toc_html TEXT NOT NULL DEFAULT ''`)
+	db.Exec(`ALTER TABLE documents ADD COLUMN description TEXT NOT NULL DEFAULT ''`)
+
+	// Backlinks table
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS backlinks (
+			source_path TEXT NOT NULL,
+			target_path TEXT NOT NULL,
+			PRIMARY KEY (source_path, target_path)
+		);
+		CREATE INDEX IF NOT EXISTS backlinks_target_idx ON backlinks(target_path);
+	`)
 	return err
 }
 
@@ -93,8 +112,8 @@ func (s *Store) Upsert(doc *Document) error {
 	now := time.Now()
 
 	_, err := s.db.Exec(`
-		INSERT INTO documents (path, title, content_md, content_html, sha, public, tags, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO documents (path, title, content_md, content_html, sha, public, tags, toc_html, description, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(path) DO UPDATE SET
 			title=excluded.title,
 			content_md=excluded.content_md,
@@ -102,8 +121,10 @@ func (s *Store) Upsert(doc *Document) error {
 			sha=excluded.sha,
 			public=excluded.public,
 			tags=excluded.tags,
+			toc_html=excluded.toc_html,
+			description=excluded.description,
 			updated_at=excluded.updated_at
-	`, doc.Path, doc.Title, doc.ContentMD, doc.ContentHTML, doc.SHA, doc.Public, string(tags), now, now)
+	`, doc.Path, doc.Title, doc.ContentMD, doc.ContentHTML, doc.SHA, doc.Public, string(tags), doc.TOCHTML, doc.Description, now, now)
 	return err
 }
 
@@ -111,9 +132,9 @@ func (s *Store) Get(path string) (*Document, error) {
 	doc := &Document{}
 	var tags string
 	err := s.db.QueryRow(`
-		SELECT path, title, content_md, content_html, sha, public, tags, created_at, updated_at
+		SELECT path, title, content_md, content_html, sha, public, tags, toc_html, description, created_at, updated_at
 		FROM documents WHERE path = ?
-	`, path).Scan(&doc.Path, &doc.Title, &doc.ContentMD, &doc.ContentHTML, &doc.SHA, &doc.Public, &tags, &doc.CreatedAt, &doc.UpdatedAt)
+	`, path).Scan(&doc.Path, &doc.Title, &doc.ContentMD, &doc.ContentHTML, &doc.SHA, &doc.Public, &tags, &doc.TOCHTML, &doc.Description, &doc.CreatedAt, &doc.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -208,4 +229,113 @@ func (s *Store) DeleteAllExcept(paths []string) error {
 	}
 	_, err := s.db.Exec("DELETE FROM documents WHERE path NOT IN ("+placeholders+")", args...)
 	return err
+}
+
+// UpsertBacklinks replaces all backlinks for a source document.
+func (s *Store) UpsertBacklinks(sourcePath string, targetPaths []string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec("DELETE FROM backlinks WHERE source_path = ?", sourcePath); err != nil {
+		return err
+	}
+
+	if len(targetPaths) > 0 {
+		stmt, err := tx.Prepare("INSERT OR IGNORE INTO backlinks (source_path, target_path) VALUES (?, ?)")
+		if err != nil {
+			return err
+		}
+		defer stmt.Close()
+
+		for _, target := range targetPaths {
+			if _, err := stmt.Exec(sourcePath, target); err != nil {
+				return err
+			}
+		}
+	}
+
+	return tx.Commit()
+}
+
+// GetBacklinks returns documents that link to the given path.
+func (s *Store) GetBacklinks(targetPath string) ([]Document, error) {
+	rows, err := s.db.Query(`
+		SELECT d.path, d.title, d.sha, d.public, d.tags, d.updated_at
+		FROM backlinks b
+		JOIN documents d ON d.path = b.source_path
+		WHERE b.target_path = ?
+		ORDER BY d.title
+	`, targetPath)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var docs []Document
+	for rows.Next() {
+		var d Document
+		var tags string
+		if err := rows.Scan(&d.Path, &d.Title, &d.SHA, &d.Public, &tags, &d.UpdatedAt); err != nil {
+			return nil, err
+		}
+		json.Unmarshal([]byte(tags), &d.Tags)
+		docs = append(docs, d)
+	}
+	return docs, nil
+}
+
+// ListByTag returns documents that have the given tag.
+func (s *Store) ListByTag(tag string) ([]Document, error) {
+	rows, err := s.db.Query(`
+		SELECT documents.path, documents.title, documents.sha, documents.public, documents.tags, documents.updated_at
+		FROM documents, json_each(documents.tags)
+		WHERE json_each.value = ?
+		ORDER BY documents.path
+	`, tag)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var docs []Document
+	for rows.Next() {
+		var d Document
+		var tags string
+		if err := rows.Scan(&d.Path, &d.Title, &d.SHA, &d.Public, &tags, &d.UpdatedAt); err != nil {
+			return nil, err
+		}
+		json.Unmarshal([]byte(tags), &d.Tags)
+		docs = append(docs, d)
+	}
+	return docs, nil
+}
+
+// ListPublic returns the most recently updated public documents.
+func (s *Store) ListPublic(limit int) ([]Document, error) {
+	rows, err := s.db.Query(`
+		SELECT path, title, description, public, tags, updated_at
+		FROM documents
+		WHERE public = 1
+		ORDER BY updated_at DESC
+		LIMIT ?
+	`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var docs []Document
+	for rows.Next() {
+		var d Document
+		var tags string
+		if err := rows.Scan(&d.Path, &d.Title, &d.Description, &d.Public, &tags, &d.UpdatedAt); err != nil {
+			return nil, err
+		}
+		json.Unmarshal([]byte(tags), &d.Tags)
+		docs = append(docs, d)
+	}
+	return docs, nil
 }

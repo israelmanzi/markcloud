@@ -1,6 +1,8 @@
 package sync
 
 import (
+	"strings"
+
 	"github.com/israelmanzi/markcloud/internal/frontmatter"
 	"github.com/israelmanzi/markcloud/internal/markdown"
 	"github.com/israelmanzi/markcloud/internal/store"
@@ -53,7 +55,7 @@ func (h *Handler) Apply(files []FileEntry, allPaths []string) error {
 		}
 
 		title := markdown.ExtractTitle(body)
-		html, err := markdown.Render(body)
+		result, err := markdown.RenderFull(body)
 		if err != nil {
 			return err
 		}
@@ -62,13 +64,31 @@ func (h *Handler) Apply(files []FileEntry, allPaths []string) error {
 			Path:        f.Path,
 			Title:       title,
 			ContentMD:   string(body),
-			ContentHTML: string(html),
+			ContentHTML: result.HTML,
 			SHA:         f.SHA,
 			Public:      meta.Public,
 			Tags:        meta.Tags,
+			TOCHTML:     result.TOC,
+			Description: result.Description,
 		}
 
 		if err := h.store.Upsert(doc); err != nil {
+			return err
+		}
+
+		// Normalize link targets to store paths (e.g. /some-page → some-page.md)
+		var targetPaths []string
+		for _, link := range result.Links {
+			target := strings.TrimPrefix(link, "/")
+			if target == "" {
+				continue
+			}
+			if !strings.HasSuffix(target, ".md") {
+				target += ".md"
+			}
+			targetPaths = append(targetPaths, target)
+		}
+		if err := h.store.UpsertBacklinks(f.Path, targetPaths); err != nil {
 			return err
 		}
 	}

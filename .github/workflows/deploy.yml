@@ -3,19 +3,12 @@ name: Deploy
 on:
   push:
     branches: [main]
-  workflow_dispatch:
-    inputs:
-      sync_content:
-        description: "Force content sync"
-        type: boolean
-        default: true
 
 jobs:
   changes:
     runs-on: ubuntu-latest
     outputs:
       app: ${{ steps.filter.outputs.app }}
-      content: ${{ steps.filter.outputs.content }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -31,12 +24,10 @@ jobs:
               - 'go.sum'
               - 'Dockerfile'
               - 'docker-compose.yml'
-            content:
-              - 'content/**'
 
   app:
     needs: changes
-    if: needs.changes.outputs.app == 'true' && github.event_name == 'push'
+    if: needs.changes.outputs.app == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Deploy app to server
@@ -82,57 +73,3 @@ jobs:
 
             docker compose exec -T markcloud sh -c "echo $(git rev-parse HEAD) > /app/.version" 2>/dev/null || true
             echo "Deployed $(git rev-parse --short HEAD)"
-
-  content:
-    needs: changes
-    if: needs.changes.outputs.content == 'true' || github.event.inputs.sync_content == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Sync markdown to server
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SERVER_SSH_KEY }}
-          timeout: 60s
-          command_timeout: 5m
-          script: |
-            set -e
-            cd ${{ secrets.APP_DIR }}
-            git fetch origin main
-            git reset --hard origin/main
-
-            DEPLOY_SECRET=$(grep -oP 'DEPLOY_SECRET=\K.*' .env)
-            MANIFEST="[]"
-            ALL_PATHS="[]"
-
-            for file in $(find ./content -name "*.md" 2>/dev/null); do
-              path="${file#./content/}"
-              sha=$(sha256sum "$file" | cut -d' ' -f1)
-              MANIFEST=$(echo "$MANIFEST" | jq --arg p "$path" --arg s "$sha" '. + [{"path": $p, "sha": $s}]')
-              ALL_PATHS=$(echo "$ALL_PATHS" | jq --arg p "$path" '. + [$p]')
-            done
-
-            DIFF=$(curl -sf -X POST http://127.0.0.1:8080/api/sync/manifest \
-              -H "Authorization: Bearer $DEPLOY_SECRET" \
-              -H "Content-Type: application/json" \
-              -d "{\"files\": $MANIFEST}")
-
-            NEED_CONTENT=$(echo "$DIFF" | jq -r '.need_content[]' 2>/dev/null || true)
-
-            FILES="[]"
-            for path in $NEED_CONTENT; do
-              sha=$(sha256sum "content/$path" | cut -d' ' -f1)
-              content=$(cat "content/$path")
-              FILES=$(echo "$FILES" | jq --arg p "$path" --arg c "$content" --arg s "$sha" \
-                '. + [{"path": $p, "content": $c, "sha": $s}]')
-            done
-
-            curl -sf -X POST http://127.0.0.1:8080/api/sync/upload \
-              -H "Authorization: Bearer $DEPLOY_SECRET" \
-              -H "Content-Type: application/json" \
-              -d "{\"files\": $FILES, \"all_paths\": $ALL_PATHS}"
-
-            echo "Sync complete"
