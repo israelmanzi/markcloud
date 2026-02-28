@@ -1,7 +1,13 @@
 package main
 
-import "fmt"
+import (
+	"os"
+
+	"github.com/israelmanzi/markcloud/internal/cli"
+)
 
 func main() {
-	fmt.Println("mc - markcloud CLI")
+	if err := cli.NewRootCmd().Execute(); err != nil {
+		os.Exit(1)
+	}
 }
