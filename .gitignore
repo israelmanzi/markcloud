@@ -1,5 +1,8 @@
 # Build output
 /bin/
+/mc
+/server
+/markcloud
 
 # Dependencies
 /vendor/
