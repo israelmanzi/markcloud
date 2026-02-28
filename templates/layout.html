@@ -9,18 +9,40 @@
 <body>
   <header>
     <nav>
-      {{if .Breadcrumbs}}
-        {{range $i, $b := .Breadcrumbs}}{{if $i}} / {{end}}<a href="{{$b.Path}}">{{$b.Name}}</a>{{end}}
-      {{else}}
-        <a href="/">markcloud</a>
-      {{end}}
-      {{if .Authenticated}}
-        <span class="nav-right"><a href="/search">search</a> <a href="/logout">logout</a></span>
-      {{end}}
+      <a href="/" class="nav-brand">markcloud</a>
+      <form method="GET" action="/" class="nav-search">
+        <input type="text" name="q" placeholder="search..." value="{{.Query}}">
+        {{if .Query}}<button type="button" class="clear-search" onclick="window.location='{{.CurrentPath}}'">clear</button>{{end}}
+        <button type="submit">search</button>
+      </form>
+      <span class="nav-actions">
+        <button type="button" class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">◑</button>
+        {{if .Authenticated}}
+          <a href="/logout">logout</a>
+        {{else}}
+          <a href="/login">authenticate</a>
+        {{end}}
+      </span>
     </nav>
   </header>
   <main>
     {{block "content" .}}{{end}}
   </main>
+  <footer class="site-footer">
+    <span id="year"></span> <a href="https://www.israelmanzi.com">Israel Manzi</a>
+  </footer>
+  <script>
+    document.getElementById('year').textContent=new Date().getFullYear();
+    (function(){
+      var t=localStorage.getItem('theme');
+      if(t)document.documentElement.setAttribute('data-theme',t);
+    })();
+    function toggleTheme(){
+      var d=document.documentElement;
+      var c=d.getAttribute('data-theme')==='dark'?'light':'dark';
+      d.setAttribute('data-theme',c);
+      localStorage.setItem('theme',c);
+    }
+  </script>
 </body>
 </html>{{end}}

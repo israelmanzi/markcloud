@@ -5,8 +5,8 @@
   {{.Content}}
 </article>
 <footer class="doc-meta">
+  <span class="date">{{humanDate .Doc.UpdatedAt}}</span>
+  {{if .Doc.Public}}<span class="badge badge-public">public</span>{{else}}<span class="badge badge-private">private</span>{{end}}
   {{range .Doc.Tags}}<span class="tag">{{.}}</span>{{end}}
-  {{if .Doc.Public}}<span class="visibility">public</span>{{else}}<span class="visibility">private</span>{{end}}
-  <span class="date">{{.Doc.UpdatedAt.Format "2006-01-02"}}</span>
 </footer>
 {{end}}

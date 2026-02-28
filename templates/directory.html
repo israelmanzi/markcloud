@@ -1,17 +1,25 @@
 {{template "layout" .}}
 {{define "title"}}{{if .Path}}{{.Path}}{{else}}markcloud{{end}}{{end}}
 {{define "content"}}
+{{if .SearchResults}}<h1>Results for "{{.Query}}"</h1>{{end}}
 {{if .Path}}<h1>{{.Path}}/</h1>{{end}}
+{{if .Entries}}
 <ul class="listing">
   {{range .Entries}}
   <li>
-    <a href="{{.Path}}">{{.Name}}</a>
+    <a href="{{.Path}}">{{if .Title}}{{.Title}}{{else}}{{.Name}}{{end}}</a>
     {{if not .IsDir}}
-      <span class="meta">{{.Date}}</span>
-      {{range .Tags}}<span class="tag">{{.}}</span>{{end}}
+      {{if .Snippet}}<p class="snippet">...{{.Snippet}}...</p>{{end}}
+      <div class="entry-meta">
+        {{if not .Date.IsZero}}<span class="date">{{humanDate .Date}}</span>{{end}}
+        {{if $.Authenticated}}{{if .Public}}<span class="badge badge-public">public</span>{{else}}<span class="badge badge-private">private</span>{{end}}{{end}}
+        {{range .Tags}}<span class="tag">{{.}}</span>{{end}}
+      </div>
     {{end}}
   </li>
   {{end}}
 </ul>
-{{if not .Entries}}<p>No documents.</p>{{end}}
+{{else}}
+  {{if .SearchResults}}<p>No results.</p>{{else}}<p>No documents.</p>{{end}}
+{{end}}
 {{end}}

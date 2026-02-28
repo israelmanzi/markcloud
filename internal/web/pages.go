@@ -3,24 +3,54 @@ package web
 import (
 	"html/template"
 	"net/http"
+	"regexp"
 	"strings"
+	"time"
 
 	"github.com/israelmanzi/markcloud/internal/store"
 )
 
+var mdSyntaxRegex = regexp.MustCompile(`(?:^#{1,6}\s+)|(?:\*{1,3})|(?:_{1,3})|(?:` + "`" + `+)|(?:^\s*[-*+]\s)|(?:^\s*\d+\.\s)|(?:^\s*>+\s?)`)
+
+func cleanSnippet(s string) template.HTML {
+	cleaned := mdSyntaxRegex.ReplaceAllString(s, "")
+	cleaned = strings.ReplaceAll(cleaned, "\n", " ")
+	cleaned = strings.Join(strings.Fields(cleaned), " ")
+	return template.HTML(cleaned)
+}
+
+func (s *Server) notFound(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotFound)
+	s.renderTemplate(w, "404.html", s.baseData(r))
+}
+
+func (s *Server) baseData(r *http.Request) map[string]any {
+	return map[string]any{
+		"Authenticated": s.isAuthenticated(r),
+		"Query":         r.URL.Query().Get("q"),
+		"CurrentPath":   r.URL.Path,
+	}
+}
+
 func (s *Server) handlePage(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/")
-	authenticated := s.isAuthenticated(r)
+	data := s.baseData(r)
+	authenticated := data["Authenticated"].(bool)
+	query := data["Query"].(string)
 
-	if path == "" {
-		if authenticated {
-			s.handleDashboard(w, r)
-		} else {
-			http.Redirect(w, r, "/public", http.StatusSeeOther)
-		}
+	// Search: /?q=... or /notes/?q=...
+	if query != "" {
+		s.handleSearch(w, r, data)
 		return
 	}
 
+	// Root listing
+	if path == "" {
+		s.handleListing(w, r, "", data)
+		return
+	}
+
+	// Try as document
 	doc, err := s.store.Get(path + ".md")
 	if err != nil {
 		http.Error(w, "Internal error", http.StatusInternalServerError)
@@ -29,18 +59,16 @@ func (s *Server) handlePage(w http.ResponseWriter, r *http.Request) {
 
 	if doc != nil {
 		if !doc.Public && !authenticated {
-			http.NotFound(w, r)
+			s.notFound(w, r)
 			return
 		}
-		s.renderTemplate(w, "document.html", map[string]any{
-			"Doc":           doc,
-			"Content":       template.HTML(doc.ContentHTML),
-			"Breadcrumbs":   buildBreadcrumbs(path),
-			"Authenticated": authenticated,
-		})
+		data["Doc"] = doc
+		data["Content"] = template.HTML(doc.ContentHTML)
+		s.renderTemplate(w, "document.html", data)
 		return
 	}
 
+	// Try as directory
 	prefix := path
 	if !strings.HasSuffix(prefix, "/") {
 		prefix += "/"
@@ -53,77 +81,32 @@ func (s *Server) handlePage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if len(docs) == 0 {
-		http.NotFound(w, r)
+		s.notFound(w, r)
+		return
+	}
+
+	s.handleListing(w, r, prefix, data)
+}
+
+func (s *Server) handleListing(w http.ResponseWriter, r *http.Request, prefix string, data map[string]any) {
+	authenticated := data["Authenticated"].(bool)
+
+	docs, err := s.store.List(prefix)
+	if err != nil {
+		http.Error(w, "Internal error", http.StatusInternalServerError)
 		return
 	}
 
 	entries := buildDirectoryEntries(docs, prefix, authenticated)
-	if len(entries) == 0 {
-		http.NotFound(w, r)
-		return
-	}
 
-	s.renderTemplate(w, "directory.html", map[string]any{
-		"Path":          path,
-		"Entries":       entries,
-		"Breadcrumbs":   buildBreadcrumbs(path),
-		"Authenticated": authenticated,
-	})
+	data["Path"] = strings.TrimSuffix(prefix, "/")
+	data["Entries"] = entries
+	s.renderTemplate(w, "directory.html", data)
 }
 
-func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
-	docs, err := s.store.List("")
-	if err != nil {
-		http.Error(w, "Internal error", http.StatusInternalServerError)
-		return
-	}
-
-	entries := buildDirectoryEntries(docs, "", true)
-
-	s.renderTemplate(w, "directory.html", map[string]any{
-		"Path":          "",
-		"Entries":       entries,
-		"Breadcrumbs":   nil,
-		"Authenticated": true,
-		"IsRoot":        true,
-	})
-}
-
-func (s *Server) handlePublicIndex(w http.ResponseWriter, r *http.Request) {
-	docs, err := s.store.List("")
-	if err != nil {
-		http.Error(w, "Internal error", http.StatusInternalServerError)
-		return
-	}
-
-	var publicDocs []map[string]any
-	for _, d := range docs {
-		if d.Public {
-			path := strings.TrimSuffix(d.Path, ".md")
-			publicDocs = append(publicDocs, map[string]any{
-				"Path":  path,
-				"Title": d.Title,
-				"Tags":  d.Tags,
-				"Date":  d.UpdatedAt.Format("2006-01-02"),
-			})
-		}
-	}
-
-	s.renderTemplate(w, "public.html", map[string]any{
-		"Docs": publicDocs,
-	})
-}
-
-func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
-	query := r.URL.Query().Get("q")
-	authenticated := s.isAuthenticated(r)
-
-	if query == "" {
-		s.renderTemplate(w, "search.html", map[string]any{
-			"Authenticated": authenticated,
-		})
-		return
-	}
+func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request, data map[string]any) {
+	query := data["Query"].(string)
+	authenticated := data["Authenticated"].(bool)
 
 	results, err := s.store.Search(query)
 	if err != nil {
@@ -142,37 +125,38 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		results = filtered
 	}
 
-	s.renderTemplate(w, "search.html", map[string]any{
-		"Query":         query,
-		"Results":       results,
-		"Authenticated": authenticated,
-	})
-}
-
-type Breadcrumb struct {
-	Name string
-	Path string
-}
-
-func buildBreadcrumbs(path string) []Breadcrumb {
-	parts := strings.Split(strings.Trim(path, "/"), "/")
-	crumbs := []Breadcrumb{{Name: "home", Path: "/"}}
-	for i, part := range parts {
-		crumbs = append(crumbs, Breadcrumb{
-			Name: part,
-			Path: "/" + strings.Join(parts[:i+1], "/"),
-		})
+	// Convert search results to dir entries for the same template
+	var entries []DirEntry
+	for _, r := range results {
+		path := strings.TrimSuffix(r.Path, ".md")
+		entry := DirEntry{
+			Name:    r.Title,
+			Path:    "/" + path,
+			Snippet: cleanSnippet(r.Snippet),
+		}
+		if doc, _ := s.store.Get(r.Path); doc != nil {
+			entry.Public = doc.Public
+			entry.Tags = doc.Tags
+			entry.Date = doc.UpdatedAt
+		}
+		entries = append(entries, entry)
 	}
-	return crumbs
+
+	data["Path"] = ""
+	data["Entries"] = entries
+	data["SearchResults"] = true
+	s.renderTemplate(w, "directory.html", data)
 }
 
 type DirEntry struct {
-	Name  string
-	Path  string
-	IsDir bool
-	Title string
-	Tags  []string
-	Date  string
+	Name    string
+	Path    string
+	IsDir   bool
+	Title   string
+	Tags    []string
+	Date    time.Time
+	Public  bool
+	Snippet template.HTML
 }
 
 func buildDirectoryEntries(docs []store.Document, prefix string, authenticated bool) []DirEntry {
@@ -200,11 +184,12 @@ func buildDirectoryEntries(docs []store.Document, prefix string, authenticated b
 		} else {
 			name := strings.TrimSuffix(parts[0], ".md")
 			entries = append(entries, DirEntry{
-				Name:  name,
-				Path:  "/" + strings.TrimSuffix(d.Path, ".md"),
-				Title: d.Title,
-				Tags:  d.Tags,
-				Date:  d.UpdatedAt.Format("2006-01-02"),
+				Name:   name,
+				Path:   "/" + strings.TrimSuffix(d.Path, ".md"),
+				Title:  d.Title,
+				Tags:   d.Tags,
+				Date:   d.UpdatedAt,
+				Public: d.Public,
 			})
 		}
 	}
