@@ -6,19 +6,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"net/http"
-	"sync"
 	"time"
 )
 
-type session struct {
-	token     string
-	expiresAt time.Time
-}
-
-var (
-	sessions   = make(map[string]session)
-	sessionsMu sync.RWMutex
-)
+const sessionDuration = 7 * 24 * time.Hour
 
 func (s *Server) generateSession() string {
 	b := make([]byte, 32)
@@ -27,10 +18,7 @@ func (s *Server) generateSession() string {
 	mac.Write(b)
 	token := hex.EncodeToString(mac.Sum(nil))
 
-	sessionsMu.Lock()
-	sessions[token] = session{token: token, expiresAt: time.Now().Add(7 * 24 * time.Hour)}
-	sessionsMu.Unlock()
-
+	s.store.CreateSession(token, time.Now().Add(sessionDuration))
 	return token
 }
 
@@ -39,12 +27,7 @@ func (s *Server) isAuthenticated(r *http.Request) bool {
 	if err != nil {
 		return false
 	}
-
-	sessionsMu.RLock()
-	sess, ok := sessions[cookie.Value]
-	sessionsMu.RUnlock()
-
-	return ok && time.Now().Before(sess.expiresAt)
+	return s.store.GetSession(cookie.Value)
 }
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
@@ -67,7 +50,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteStrictMode,
-		MaxAge:   7 * 24 * 60 * 60,
+		MaxAge:   int(sessionDuration.Seconds()),
 	})
 
 	http.Redirect(w, r, "/", http.StatusSeeOther)
@@ -76,9 +59,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	cookie, err := r.Cookie("session")
 	if err == nil {
-		sessionsMu.Lock()
-		delete(sessions, cookie.Value)
-		sessionsMu.Unlock()
+		s.store.DeleteSession(cookie.Value)
 	}
 
 	http.SetCookie(w, &http.Cookie{

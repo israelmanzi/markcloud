@@ -100,6 +100,17 @@ func migrate(db *sql.DB) error {
 		);
 		CREATE INDEX IF NOT EXISTS backlinks_target_idx ON backlinks(target_path);
 	`)
+	if err != nil {
+		return err
+	}
+
+	// Sessions table
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS sessions (
+			token TEXT PRIMARY KEY,
+			expires_at DATETIME NOT NULL
+		)
+	`)
 	return err
 }
 
@@ -311,6 +322,29 @@ func (s *Store) ListByTag(tag string) ([]Document, error) {
 		docs = append(docs, d)
 	}
 	return docs, nil
+}
+
+// CreateSession stores a session token with an expiry time.
+func (s *Store) CreateSession(token string, expiresAt time.Time) error {
+	_, err := s.db.Exec("INSERT INTO sessions (token, expires_at) VALUES (?, ?)", token, expiresAt)
+	return err
+}
+
+// GetSession checks if a valid (non-expired) session exists.
+func (s *Store) GetSession(token string) bool {
+	var count int
+	s.db.QueryRow("SELECT COUNT(*) FROM sessions WHERE token = ? AND expires_at > ?", token, time.Now()).Scan(&count)
+	return count > 0
+}
+
+// DeleteSession removes a session by token.
+func (s *Store) DeleteSession(token string) {
+	s.db.Exec("DELETE FROM sessions WHERE token = ?", token)
+}
+
+// CleanExpiredSessions removes all expired sessions.
+func (s *Store) CleanExpiredSessions() {
+	s.db.Exec("DELETE FROM sessions WHERE expires_at <= ?", time.Now())
 }
 
 // ListPublic returns the most recently updated public documents.

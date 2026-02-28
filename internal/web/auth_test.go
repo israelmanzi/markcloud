@@ -4,12 +4,30 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/israelmanzi/markcloud/internal/store"
 )
 
+func testServer(t *testing.T) *Server {
+	t.Helper()
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	s, err := store.New(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		s.Close()
+		os.Remove(dbPath)
+	})
+	return &Server{apiKey: "test-key", store: s}
+}
+
 func TestLoginHandler(t *testing.T) {
-	srv := &Server{apiKey: "test-key"}
+	srv := testServer(t)
 
 	form := url.Values{"api_key": {"test-key"}}
 	req := httptest.NewRequest("POST", "/login", strings.NewReader(form.Encode()))
@@ -35,7 +53,7 @@ func TestLoginHandler(t *testing.T) {
 }
 
 func TestLoginHandlerBadKey(t *testing.T) {
-	srv := &Server{apiKey: "test-key"}
+	srv := testServer(t)
 
 	form := url.Values{"api_key": {"wrong-key"}}
 	req := httptest.NewRequest("POST", "/login", strings.NewReader(form.Encode()))
@@ -50,7 +68,7 @@ func TestLoginHandlerBadKey(t *testing.T) {
 }
 
 func TestIsAuthenticated(t *testing.T) {
-	srv := &Server{apiKey: "test-key"}
+	srv := testServer(t)
 	token := srv.generateSession()
 
 	req := httptest.NewRequest("GET", "/", nil)
