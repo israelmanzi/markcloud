@@ -31,6 +31,9 @@ Thumbs.db
 # Docs (local only)
 /docs/
 
+# Content (managed by CLI)
+/content/
+
 # Data
 /data/
 
