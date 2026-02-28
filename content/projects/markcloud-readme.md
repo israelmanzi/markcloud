@@ -2,7 +2,7 @@
 tags:
     - projects
     - misc
-public: false
+public: true
 ---
 
 # markcloud
