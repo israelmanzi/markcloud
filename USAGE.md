@@ -4,12 +4,26 @@ Personal markdown hosting platform. Write locally, sync to your server, browse o
 
 ## Architecture
 
-Two binaries built from the same repo:
+Go monorepo producing two binaries:
 
 - **`mc`** — CLI for managing documents locally and syncing to the server
 - **`server`** — Web server with SQLite storage, full-text search, and RSS
 
-Flow: local markdown files → `mc sync` → server HTTP API → SQLite + FTS5 → web UI at your domain.
+```
+local markdown files
+        │
+    mc sync (HTTP API, SHA-256 diffing)
+        │
+   ┌────▼────┐
+   │  server  │──── SQLite + FTS5
+   └────┬────┘
+        │
+   web UI at your domain
+```
+
+The CLI manages a local `content_dir` (tracked with a local git repo for change history). On `mc sync`, it computes SHA-256 hashes, sends a manifest to the server to identify changes, then uploads only the files that differ. The server parses markdown, extracts metadata, renders HTML, and stores everything in SQLite.
+
+Deployment: Docker container on a server, GitHub Actions workflow rebuilds and deploys on push to `main` with automatic rollback on health check failure.
 
 ## Build
 
@@ -137,10 +151,8 @@ Content here...
 - GitHub-flavored markdown (tables, task lists, strikethrough)
 - Syntax-highlighted code blocks
 - Callout blocks (`[!NOTE]`, `[!WARNING]`, `[!TIP]`, `[!IMPORTANT]`, `[!CAUTION]`)
+- Wikilinks (`[[page]]` and `[[page|text]]`)
 - RSS feed at `/feed.xml`
 - Sitemap at `/sitemap.xml`
+- SEO: OpenGraph, Twitter Cards, JSON-LD, canonical URLs
 - Light/dark theme toggle
-
-## Deployment
-
-The server is deployed via Docker. The GitHub Actions workflow in `.github/workflows/deploy.yml` handles building and deploying on push to `main`, with automatic rollback on health check failure.
