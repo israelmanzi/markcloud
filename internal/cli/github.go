@@ -79,6 +79,14 @@ func (g *GitHubClient) DeleteFile(ctx context.Context, path string, message stri
 	return err
 }
 
+func (g *GitHubClient) DispatchWorkflow(ctx context.Context, workflowFile, ref string, inputs map[string]interface{}) error {
+	_, err := g.client.Actions.CreateWorkflowDispatchEventByFileName(ctx, g.owner, g.repo, workflowFile, github.CreateWorkflowDispatchEventRequest{
+		Ref:    ref,
+		Inputs: inputs,
+	})
+	return err
+}
+
 func (g *GitHubClient) GetLatestWorkflowRun(ctx context.Context) (*github.WorkflowRun, error) {
 	runs, _, err := g.client.Actions.ListRepositoryWorkflowRuns(ctx, g.owner, g.repo, &github.ListWorkflowRunsOptions{
 		ListOptions: github.ListOptions{PerPage: 1},

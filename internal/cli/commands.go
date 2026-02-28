@@ -28,6 +28,7 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newRmCmd())
 	root.AddCommand(newMvCmd())
 	root.AddCommand(newStatusCmd())
+	root.AddCommand(newSyncCmd())
 
 	return root
 }
@@ -332,6 +333,33 @@ func newStatusCmd() *cobra.Command {
 				frame++
 				time.Sleep(3 * time.Second)
 			}
+		},
+	}
+}
+
+func newSyncCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "sync",
+		Short: "Trigger content sync to server",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			gh, err := getClient()
+			if err != nil {
+				return err
+			}
+
+			ctx := context.Background()
+			fmt.Print("Triggering sync...")
+
+			err = gh.DispatchWorkflow(ctx, "deploy.yml", "main", map[string]interface{}{
+				"sync_content": "true",
+			})
+			if err != nil {
+				return fmt.Errorf("dispatch failed: %w", err)
+			}
+
+			fmt.Println(" triggered")
+			fmt.Println("Run `mc status` to track progress")
+			return nil
 		},
 	}
 }

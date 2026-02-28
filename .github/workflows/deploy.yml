@@ -3,6 +3,12 @@ name: Deploy
 on:
   push:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      sync_content:
+        description: "Force content sync"
+        type: boolean
+        default: true
 
 jobs:
   changes:
@@ -79,7 +85,7 @@ jobs:
 
   content:
     needs: changes
-    if: needs.changes.outputs.content == 'true'
+    if: needs.changes.outputs.content == 'true' || github.event.inputs.sync_content == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
