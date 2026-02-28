@@ -1,0 +1,32 @@
+# Build output
+/bin/
+
+# Dependencies
+/vendor/
+
+# Environment
+.env
+.env.*
+
+# Database
+*.db
+*.sqlite
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docs (local only)
+/docs/
+
+# Data
+/data/
+
+# Claude
+.claude/
