@@ -116,11 +116,6 @@ jobs:
 
             NEED_CONTENT=$(echo "$DIFF" | jq -r '.need_content[]' 2>/dev/null || true)
 
-            if [ -z "$NEED_CONTENT" ]; then
-              echo "Nothing to sync"
-              exit 0
-            fi
-
             FILES="[]"
             for path in $NEED_CONTENT; do
               sha=$(sha256sum "content/$path" | cut -d' ' -f1)

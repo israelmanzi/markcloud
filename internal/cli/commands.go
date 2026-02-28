@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/israelmanzi/markcloud/internal/frontmatter"
 	"github.com/spf13/cobra"
@@ -306,16 +307,31 @@ func newStatusCmd() *cobra.Command {
 			}
 
 			ctx := context.Background()
-			run, err := gh.GetLatestWorkflowRun(ctx)
-			if err != nil {
-				return err
-			}
+			frames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+			frame := 0
 
-			fmt.Printf("Run:    %s\n", run.GetName())
-			fmt.Printf("Status: %s\n", run.GetStatus())
-			fmt.Printf("Result: %s\n", run.GetConclusion())
-			fmt.Printf("URL:    %s\n", run.GetHTMLURL())
-			return nil
+			for {
+				run, err := gh.GetLatestWorkflowRun(ctx)
+				if err != nil {
+					return err
+				}
+
+				status := run.GetStatus()
+				if status == "completed" {
+					conclusion := run.GetConclusion()
+					mark := "✓"
+					if conclusion != "success" {
+						mark = "✗"
+					}
+					fmt.Printf("\r%s %s — %s\n", mark, run.GetName(), conclusion)
+					fmt.Printf("  %s\n", run.GetHTMLURL())
+					return nil
+				}
+
+				fmt.Printf("\r%s %s — %s...", frames[frame%len(frames)], run.GetName(), status)
+				frame++
+				time.Sleep(3 * time.Second)
+			}
 		},
 	}
 }
