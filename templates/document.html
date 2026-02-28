@@ -1,0 +1,12 @@
+{{template "layout" .}}
+{{define "title"}}{{.Doc.Title}} - markcloud{{end}}
+{{define "content"}}
+<article>
+  {{.Content}}
+</article>
+<footer class="doc-meta">
+  {{range .Doc.Tags}}<span class="tag">{{.}}</span>{{end}}
+  {{if .Doc.Public}}<span class="visibility">public</span>{{else}}<span class="visibility">private</span>{{end}}
+  <span class="date">{{.Doc.UpdatedAt.Format "2006-01-02"}}</span>
+</footer>
+{{end}}

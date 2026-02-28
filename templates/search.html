@@ -1,0 +1,23 @@
+{{template "layout" .}}
+{{define "title"}}search - markcloud{{end}}
+{{define "content"}}
+<form method="GET" action="/search" class="search-form">
+  <input type="text" name="q" value="{{.Query}}" placeholder="Search documents..." autofocus>
+  <button type="submit">Search</button>
+  {{if .Query}}<a href="/search" class="clear-search">clear</a>{{end}}
+</form>
+{{if .Query}}
+  {{if .Results}}
+  <ul class="listing">
+    {{range .Results}}
+    <li>
+      <a href="/{{.Path}}">{{if .Title}}{{.Title}}{{else}}{{.Path}}{{end}}</a>
+      <p class="snippet">{{.Snippet}}</p>
+    </li>
+    {{end}}
+  </ul>
+  {{else}}
+  <p>No results for "{{.Query}}".</p>
+  {{end}}
+{{end}}
+{{end}}

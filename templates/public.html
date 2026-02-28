@@ -1,0 +1,18 @@
+{{template "layout" .}}
+{{define "title"}}public - markcloud{{end}}
+{{define "content"}}
+<h1>Public documents</h1>
+{{if .Docs}}
+<ul class="listing">
+  {{range .Docs}}
+  <li>
+    <a href="/{{.Path}}">{{if .Title}}{{.Title}}{{else}}{{.Path}}{{end}}</a>
+    <span class="meta">{{.Date}}</span>
+    {{range .Tags}}<span class="tag">{{.}}</span>{{end}}
+  </li>
+  {{end}}
+</ul>
+{{else}}
+<p>No public documents.</p>
+{{end}}
+{{end}}

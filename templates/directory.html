@@ -1,0 +1,17 @@
+{{template "layout" .}}
+{{define "title"}}{{if .Path}}{{.Path}}{{else}}markcloud{{end}}{{end}}
+{{define "content"}}
+{{if .Path}}<h1>{{.Path}}/</h1>{{end}}
+<ul class="listing">
+  {{range .Entries}}
+  <li>
+    <a href="{{.Path}}">{{.Name}}</a>
+    {{if not .IsDir}}
+      <span class="meta">{{.Date}}</span>
+      {{range .Tags}}<span class="tag">{{.}}</span>{{end}}
+    {{end}}
+  </li>
+  {{end}}
+</ul>
+{{if not .Entries}}<p>No documents.</p>{{end}}
+{{end}}

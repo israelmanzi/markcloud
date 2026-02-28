@@ -1,0 +1,26 @@
+{{define "layout"}}<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{block "title" .}}markcloud{{end}}</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <nav>
+      {{if .Breadcrumbs}}
+        {{range $i, $b := .Breadcrumbs}}{{if $i}} / {{end}}<a href="{{$b.Path}}">{{$b.Name}}</a>{{end}}
+      {{else}}
+        <a href="/">markcloud</a>
+      {{end}}
+      {{if .Authenticated}}
+        <span class="nav-right"><a href="/search">search</a> <a href="/logout">logout</a></span>
+      {{end}}
+    </nav>
+  </header>
+  <main>
+    {{block "content" .}}{{end}}
+  </main>
+</body>
+</html>{{end}}

@@ -1,0 +1,11 @@
+{{template "layout" .}}
+{{define "title"}}login - markcloud{{end}}
+{{define "content"}}
+<div class="login">
+  {{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+  <form method="POST" action="/login">
+    <input type="password" name="api_key" placeholder="API key" autofocus>
+    <button type="submit">Enter</button>
+  </form>
+</div>
+{{end}}

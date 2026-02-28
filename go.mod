@@ -12,4 +12,5 @@ require (
 require (
 	github.com/alecthomas/chroma/v2 v2.2.0 // indirect
 	github.com/dlclark/regexp2 v1.7.0 // indirect
+	github.com/joho/godotenv v1.5.1 // indirect
 )
