@@ -36,7 +36,7 @@ jobs:
 
   app:
     needs: changes
-    if: needs.changes.outputs.app == 'true'
+    if: needs.changes.outputs.app == 'true' && github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - name: Deploy app to server
