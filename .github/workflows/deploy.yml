@@ -85,43 +85,53 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Sync markdown to server
-        env:
-          DEPLOY_SECRET: ${{ secrets.MARKCLOUD_DEPLOY_SECRET }}
-          SERVER_URL: ${{ secrets.MARKCLOUD_SERVER_URL }}
-        run: |
-          MANIFEST="[]"
-          ALL_PATHS="[]"
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          envs: DEPLOY_SECRET
+          script_stop: true
+          script: |
+            set -e
+            cd ${{ secrets.APP_DIR }}
+            git fetch origin main
+            git reset --hard origin/main
 
-          for file in $(find ./content -name "*.md" 2>/dev/null); do
-            path="${file#./content/}"
-            sha=$(sha256sum "$file" | cut -d' ' -f1)
-            MANIFEST=$(echo "$MANIFEST" | jq --arg p "$path" --arg s "$sha" '. + [{"path": $p, "sha": $s}]')
-            ALL_PATHS=$(echo "$ALL_PATHS" | jq --arg p "$path" '. + [$p]')
-          done
+            DEPLOY_SECRET=$(grep -oP 'DEPLOY_SECRET=\K.*' .env)
+            MANIFEST="[]"
+            ALL_PATHS="[]"
 
-          DIFF=$(curl -sf -X POST "$SERVER_URL/api/sync/manifest" \
-            -H "Authorization: Bearer $DEPLOY_SECRET" \
-            -H "Content-Type: application/json" \
-            -d "{\"files\": $MANIFEST}")
+            for file in $(find ./content -name "*.md" 2>/dev/null); do
+              path="${file#./content/}"
+              sha=$(sha256sum "$file" | cut -d' ' -f1)
+              MANIFEST=$(echo "$MANIFEST" | jq --arg p "$path" --arg s "$sha" '. + [{"path": $p, "sha": $s}]')
+              ALL_PATHS=$(echo "$ALL_PATHS" | jq --arg p "$path" '. + [$p]')
+            done
 
-          NEED_CONTENT=$(echo "$DIFF" | jq -r '.need_content[]' 2>/dev/null || true)
+            DIFF=$(curl -sf -X POST http://127.0.0.1:8080/api/sync/manifest \
+              -H "Authorization: Bearer $DEPLOY_SECRET" \
+              -H "Content-Type: application/json" \
+              -d "{\"files\": $MANIFEST}")
 
-          if [ -z "$NEED_CONTENT" ]; then
-            echo "Nothing to sync"
-            exit 0
-          fi
+            NEED_CONTENT=$(echo "$DIFF" | jq -r '.need_content[]' 2>/dev/null || true)
 
-          FILES="[]"
-          for path in $NEED_CONTENT; do
-            sha=$(sha256sum "content/$path" | cut -d' ' -f1)
-            content=$(cat "content/$path")
-            FILES=$(echo "$FILES" | jq --arg p "$path" --arg c "$content" --arg s "$sha" \
-              '. + [{"path": $p, "content": $c, "sha": $s}]')
-          done
+            if [ -z "$NEED_CONTENT" ]; then
+              echo "Nothing to sync"
+              exit 0
+            fi
 
-          curl -sf -X POST "$SERVER_URL/api/sync/upload" \
-            -H "Authorization: Bearer $DEPLOY_SECRET" \
-            -H "Content-Type: application/json" \
-            -d "{\"files\": $FILES, \"all_paths\": $ALL_PATHS}"
+            FILES="[]"
+            for path in $NEED_CONTENT; do
+              sha=$(sha256sum "content/$path" | cut -d' ' -f1)
+              content=$(cat "content/$path")
+              FILES=$(echo "$FILES" | jq --arg p "$path" --arg c "$content" --arg s "$sha" \
+                '. + [{"path": $p, "content": $c, "sha": $s}]')
+            done
 
-          echo "Sync complete"
+            curl -sf -X POST http://127.0.0.1:8080/api/sync/upload \
+              -H "Authorization: Bearer $DEPLOY_SECRET" \
+              -H "Content-Type: application/json" \
+              -d "{\"files\": $FILES, \"all_paths\": $ALL_PATHS}"
+
+            echo "Sync complete"
