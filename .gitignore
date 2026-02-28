@@ -10,10 +10,12 @@
 
 # Environment
 .env
-.env.*
+.env.production
 
 # Database
 *.db
+*.db-shm
+*.db-wal
 *.sqlite
 
 # Editor

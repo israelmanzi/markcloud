@@ -1,0 +1,57 @@
+name: Deploy to markcloud
+
+on:
+  push:
+    branches: [main]
+    paths: ["**.md"]
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Collect and sync markdown files
+        env:
+          DEPLOY_SECRET: ${{ secrets.MARKCLOUD_DEPLOY_SECRET }}
+          SERVER_URL: ${{ secrets.MARKCLOUD_SERVER_URL }}
+        run: |
+          # Build manifest
+          MANIFEST="[]"
+          ALL_PATHS="[]"
+
+          for file in $(find . -name "*.md" -not -path "./.github/*" -not -path "./README.md" -not -path "./CHANGELOG.md"); do
+            path="${file#./}"
+            sha=$(sha256sum "$file" | cut -d' ' -f1)
+            MANIFEST=$(echo "$MANIFEST" | jq --arg p "$path" --arg s "$sha" '. + [{"path": $p, "sha": $s}]')
+            ALL_PATHS=$(echo "$ALL_PATHS" | jq --arg p "$path" '. + [$p]')
+          done
+
+          # Step 1: Send manifest, get diff
+          DIFF=$(curl -sf -X POST "$SERVER_URL/api/sync/manifest" \
+            -H "Authorization: Bearer $DEPLOY_SECRET" \
+            -H "Content-Type: application/json" \
+            -d "{\"files\": $MANIFEST}")
+
+          NEED_CONTENT=$(echo "$DIFF" | jq -r '.need_content[]' 2>/dev/null || true)
+
+          if [ -z "$NEED_CONTENT" ]; then
+            echo "Nothing to sync"
+            exit 0
+          fi
+
+          # Step 2: Send changed files
+          FILES="[]"
+          for path in $NEED_CONTENT; do
+            sha=$(sha256sum "$path" | cut -d' ' -f1)
+            content=$(cat "$path")
+            FILES=$(echo "$FILES" | jq --arg p "$path" --arg c "$content" --arg s "$sha" \
+              '. + [{"path": $p, "content": $c, "sha": $s}]')
+          done
+
+          curl -sf -X POST "$SERVER_URL/api/sync/upload" \
+            -H "Authorization: Bearer $DEPLOY_SECRET" \
+            -H "Content-Type: application/json" \
+            -d "{\"files\": $FILES, \"all_paths\": $ALL_PATHS}"
+
+          echo "Sync complete"
