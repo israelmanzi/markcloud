@@ -1,12 +1,42 @@
 {{template "layout" .}}
 {{define "title"}}{{.Doc.Title}} - markcloud{{end}}
 {{define "content"}}
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Article",
+  "headline": "{{.OGTitle}}",
+  "description": "{{.OGDescription}}",
+  "dateModified": "{{.DateModified}}",
+  "url": "{{.BaseURL}}{{.CurrentPath}}",
+  "author": {
+    "@type": "Person",
+    "name": "Israel Manzi"
+  }
+}
+</script>
+{{if .Breadcrumbs}}
+<nav class="breadcrumbs">
+  {{range .Breadcrumbs}}{{if .Last}}<span>{{.Name}}</span>{{else}}<a href="{{.Href}}">{{.Name}}</a> / {{end}}{{end}}
+</nav>
+{{end}}
+{{if .TOC}}
+{{.TOC}}
+{{end}}
 <article>
   {{.Content}}
 </article>
 <footer class="doc-meta">
   <span class="date">{{humanDate .Doc.UpdatedAt}}</span>
   {{if .Doc.Public}}<span class="badge badge-public">public</span>{{else}}<span class="badge badge-private">private</span>{{end}}
-  {{range .Doc.Tags}}<span class="tag">{{.}}</span>{{end}}
+  {{range .Doc.Tags}}<a href="/?tag={{.}}" class="tag">{{.}}</a>{{end}}
 </footer>
+{{if .Backlinks}}
+<section class="backlinks">
+  <h3>Linked from</h3>
+  <ul>
+    {{range .Backlinks}}<li><a href="/{{trimSuffix ".md" .Path}}">{{if .Title}}{{.Title}}{{else}}{{trimSuffix ".md" .Path}}{{end}}</a></li>{{end}}
+  </ul>
+</section>
+{{end}}
 {{end}}

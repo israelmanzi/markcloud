@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/israelmanzi/markcloud/internal/store"
@@ -41,6 +42,9 @@ var funcMap = template.FuncMap{
 		default:
 			return t.Format("Jan 2, 2006")
 		}
+	},
+	"trimSuffix": func(suffix, s string) string {
+		return strings.TrimSuffix(s, suffix)
 	},
 }
 
@@ -102,6 +106,9 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/logout", s.handleLogout)
 	mux.HandleFunc("/api/sync/manifest", s.handleSyncManifest)
 	mux.HandleFunc("/api/sync/upload", s.handleSyncUpload)
+	mux.HandleFunc("/feed.xml", s.handleFeed)
+	mux.HandleFunc("/sitemap.xml", s.handleSitemap)
+	mux.HandleFunc("/robots.txt", s.handleRobots)
 	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
 	mux.HandleFunc("/", s.handlePage)
 

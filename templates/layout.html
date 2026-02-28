@@ -4,6 +4,19 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{block "title" .}}markcloud{{end}}</title>
+  <link rel="canonical" href="{{.BaseURL}}{{.CurrentPath}}">
+  {{if .IsDocument}}
+  <meta name="description" content="{{.OGDescription}}">
+  <meta property="og:title" content="{{.OGTitle}}">
+  <meta property="og:description" content="{{.OGDescription}}">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="{{.BaseURL}}{{.CurrentPath}}">
+  <meta property="og:site_name" content="markcloud">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="{{.OGTitle}}">
+  <meta name="twitter:description" content="{{.OGDescription}}">
+  {{end}}
+  <link rel="alternate" type="application/rss+xml" title="markcloud" href="/feed.xml">
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -16,7 +29,7 @@
         <button type="submit">search</button>
       </form>
       <span class="nav-actions">
-        <button type="button" class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">◑</button>
+        <button type="button" class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">&#x25D1;</button>
         {{if .Authenticated}}
           <a href="/logout">logout</a>
         {{else}}
@@ -29,7 +42,7 @@
     {{block "content" .}}{{end}}
   </main>
   <footer class="site-footer">
-    <span id="year"></span> <a href="https://www.israelmanzi.com" target="_blank" rel="noopener">Israel Manzi ↗</a>
+    <span id="year"></span> <a href="https://www.israelmanzi.com" target="_blank" rel="noopener">Israel Manzi &#x2197;</a>
   </footer>
   <script>
     document.getElementById('year').textContent=new Date().getFullYear();
@@ -39,7 +52,9 @@
     })();
     function toggleTheme(){
       var d=document.documentElement;
-      var c=d.getAttribute('data-theme')==='dark'?'light':'dark';
+      var cur=d.getAttribute('data-theme')||
+        (window.matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');
+      var c=cur==='dark'?'light':'dark';
       d.setAttribute('data-theme',c);
       localStorage.setItem('theme',c);
     }
