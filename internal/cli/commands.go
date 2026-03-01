@@ -211,6 +211,7 @@ func newUploadCmd() *cobra.Command {
 	cmd.Flags().StringVar(&tags, "tags", "", "Comma-separated tags")
 	cmd.Flags().BoolVar(&public, "public", false, "Make document public")
 	cmd.MarkFlagRequired("path")
+	cmd.MarkFlagFilename("path", "md")
 
 	return cmd
 }
